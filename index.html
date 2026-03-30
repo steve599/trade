@@ -168,6 +168,7 @@ input[type=file]{display:none}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 </head>
 <body>
 <div id="app">
@@ -406,35 +407,47 @@ function loadImg(file){
 // ── OCR + Analysis ───────────────────────────────────────────────
 document.getElementById('btn-run').addEventListener('click',runOCR);
 
-async function runOCR(){
-  if(!imgData) return;
-  const box=document.getElementById('ocr-box');
-  const msg=document.getElementById('ocr-msg');
-  const bar=document.getElementById('ocr-bar');
-  const dot=document.getElementById('dot');
-  box.style.display='block'; bar.style.width='0%'; dot.classList.add('on');
+async function processImageLocally(imageSource) {
+  const statusEl = document.getElementById('status-text'); // Adjust ID if different
+  statusEl.textContent = "Scanning image locally...";
 
-  try{
-    const res=await Tesseract.recognize(imgData,'eng',{
-      logger:m=>{
-        if(m.status==='recognizing text'){
-          const p=Math.round(m.progress*100);
-          bar.style.width=p+'%';
-          msg.textContent='Scanning… '+p+'%';
-        }
-      }
-    });
-    msg.textContent='Analysis complete ✓';
-    dot.classList.remove('on');
-    const txt=res.data.text;
-    analysis=analyzeText(txt);
-    renderCards(analysis,txt);
-  }catch(err){
-    msg.textContent='Error: '+err.message;
-    dot.classList.remove('on');
+  try {
+    // Run Tesseract OCR
+    const worker = await Tesseract.createWorker('eng');
+    const { data: { text } } = await worker.recognize(imageSource);
+    await worker.terminate();
+
+    console.log("Raw OCR Text:", text);
+    
+    // Parse the raw text for data
+    const results = parseOcrText(text);
+    
+    // Update the UI cards
+    updateUI(results);
+    
+    // Generate the final report string
+    generateReport(results);
+    
+    statusEl.textContent = "Scan Complete";
+  } catch (error) {
+    console.error("OCR Error:", error);
+    statusEl.textContent = "Scan Failed";
   }
 }
 
+// Simple Parser: Looking for numbers and keywords in the raw text
+function parseOcrText(text) {
+  const lines = text.split('\n');
+  const numbers = text.match(/\d+\.\d{2,}/g) || []; // Finds prices like 150.25
+  
+  return {
+    trend: text.toUpperCase().includes('UP') || text.toUpperCase().includes('BULL') ? 'UP' : 'DOWN',
+    cur: numbers[0] || '0.00',
+    hi: numbers.length > 1 ? Math.max(...numbers.map(Number)) : '0.00',
+    lo: numbers.length > 1 ? Math.min(...numbers.map(Number)) : '0.00',
+    days: text.match(/(\d+)\s*days/i)?.[1] || 'N/A'
+  };
+}
 // ── Analysis Engine ──────────────────────────────────────────────
 function analyzeText(text){
   const prices=extractPrices(text);
@@ -651,17 +664,25 @@ function buildReport(){
 }
 
 // ── Copy ─────────────────────────────────────────────────────────
-document.getElementById('btn-copy').addEventListener('click',async function(){
-  const txt=this.dataset.report||reportText;
-  if(!txt) return;
-  try{
-    await navigator.clipboard.writeText(txt);
-  }catch{
-    const ta=Object.assign(document.createElement('textarea'),{value:txt,style:'position:fixed;opacity:0'});
-    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+document.getElementById('btn-copy').addEventListener('click', async function() {
+  const text = this.dataset.report || reportText;
+  if (!text) return;
+
+  // This triggers the native iOS Share Sheet (Notes, Messages, etc.)
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: 'Trade Analysis Report',
+        text: text
+      });
+    } catch (err) {
+      console.log('Share failed', err);
+    }
+  } else {
+    // Fallback to clipboard if sharing isn't supported
+    navigator.clipboard.writeText(text);
+    alert('Copied to clipboard!');
   }
-  const el=document.getElementById('copy-ok');
-  el.style.display='block'; setTimeout(()=>el.style.display='none',3000);
 });
 </script>
 </body>
