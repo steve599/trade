@@ -402,6 +402,34 @@ function loadImg(file){
   };
   r.readAsDataURL(file);
 }
+function preprocessImage(imgSrc){
+  return new Promise(resolve=>{
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = img.width;
+      canvas.height = img.height;
+
+      ctx.drawImage(img,0,0);
+
+      // Convert to grayscale + increase contrast
+      const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
+      const data = imgData.data;
+
+      for(let i=0;i<data.length;i+=4){
+        const avg = (data[i]+data[i+1]+data[i+2])/3;
+        const val = avg > 140 ? 255 : 0; // threshold
+        data[i]=data[i+1]=data[i+2]=val;
+      }
+
+      ctx.putImageData(imgData,0,0);
+      resolve(canvas.toDataURL());
+    };
+    img.src = imgSrc;
+  });
+}
 
 // ── OCR + Analysis ───────────────────────────────────────────────
 document.getElementById('btn-run').addEventListener('click',runOCR);
@@ -413,6 +441,11 @@ async function runOCR() {
   const msg = document.getElementById('ocr-msg');
   const bar = document.getElementById('ocr-bar');
   const dot = document.getElementById('dot');
+
+const processed = await preprocessImage(imgData);
+
+const res = await Tesseract.recognize(processed,'eng',{
+
   
   box.style.display = 'block'; 
   bar.style.width = '0%'; 
@@ -514,7 +547,7 @@ function analyzeText(text){
 
 function extractPrices(text) {
   // Matches digits that might have commas or dots, specifically looking for money patterns
-  const re = /(?:^|\s)\$?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2,4})?)(?!\w)/g;
+  const re=/\$?\s*\d{1,6}(?:,\d{3})*(?:\.\d{2})/g;
   const found = [];
   let m;
   while ((m = re.exec(text)) !== null) {
@@ -694,43 +727,27 @@ function buildReport(){
 }
 
 // ── Copy ─────────────────────────────────────────────────────────
-document.getElementById('btn-copy').addEventListener('click', async function() {
+document.getElementById('btn-copy').addEventListener('click',function(){
   const txt = this.dataset.report || reportText;
-  if (!txt) return;
+  if(!txt) return;
 
-  const shareData = {
-    title: 'ScreenScan Report',
-    text: txt
-  };
+  const blob = new Blob([txt], { type: 'text/plain' });
+  const fileName = 'ScreenScan_Report.txt';
 
-  // 1. Try Web Share API (Primary for mobile 'Notes')
-  if (navigator.canShare && navigator.canShare(shareData)) {
-    try {
-      await navigator.share(shareData);
-      showToast('Shared successfully!');
-      return;
-    } catch (err) {
-      if (err.name !== 'AbortError') console.error('Share failed:', err);
-    }
+  // iOS / modern browsers (opens in share sheet → save to Notes)
+  if (navigator.canShare && navigator.canShare({ files: [new File([blob], fileName)] })) {
+    const file = new File([blob], fileName, { type: 'text/plain' });
+    navigator.share({ files: [file], title: 'ScreenScan Report' });
+    return;
   }
 
-  // 2. Fallback: Download as .txt file
-  try {
-    const blob = new Blob([txt], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ScreenScan_Report_${new Date().getTime()}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('Report downloaded as .txt');
-  } catch (err) {
-    // 3. Final Fallback: Traditional Copy to Clipboard
-    await navigator.clipboard.writeText(txt);
-    showToast('Copied to clipboard');
-  }
+  // Fallback: download file
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 });
 
 // Helper for UI feedback
