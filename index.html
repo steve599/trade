@@ -321,7 +321,8 @@ document.getElementById('btn-cam').addEventListener('click',()=>document.getElem
 document.getElementById('btn-up').addEventListener('click',()=>document.getElementById('f-up').click());
 
 ['f-up','f-cam'].forEach(id=>{
-  document.getElementById(id).addEventListener('change',e=>{
+  const el = document.getElementById(id);
+  if(el) el.addEventListener('change',e=>{
     const f=e.target.files[0]; if(f) loadImg(f); e.target.value='';
   });
 });
@@ -339,20 +340,20 @@ function loadImg(file){
   r.readAsDataURL(file);
 }
 
-// ── Pre-processing (Inversion + Upscale) ──────────────────────────
+// ── Image Pre-processing (Optimized for Dark Charts) ──────────────
 function preprocessImage(dataUrl) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
-      // Upscale x2 for tiny numbers
+      // Upscale x2 makes tiny numbers much easier to read
       canvas.width = img.width * 2;
       canvas.height = img.height * 2;
-      // Invert for Dark Mode + Grayscale
+      // Invert + High Contrast (Turns dark UI into black text on white)
       ctx.filter = 'invert(1) grayscale(1) contrast(4) brightness(1.1)';
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.95);
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.9);
     };
     img.src = dataUrl;
   });
@@ -371,28 +372,35 @@ async function runOCR() {
   box.style.display = 'block'; 
   bar.style.width = '0%'; 
   dot.classList.add('on');
+  msg.textContent = "Loading Engine...";
 
   try {
     const processedBlob = await preprocessImage(imgData);
     
-    // Tesseract v5 Syntax
-    const worker = await Tesseract.createWorker(['eng', 'chi_sim']);
+    // Initialize with logger that shows ALL statuses
+    const worker = await Tesseract.createWorker({
+      logger: m => {
+        // Show progress for both downloading and recognizing
+        const p = Math.round(m.progress * 100);
+        bar.style.width = p + '%';
+        if (m.status === 'loading language traineddata') {
+          msg.textContent = `Downloading Assets… ${p}%`;
+        } else if (m.status === 'recognizing text') {
+          msg.textContent = `Scanning UI… ${p}%`;
+        } else {
+          msg.textContent = m.status + "...";
+        }
+      }
+    });
 
+    await worker.loadLanguage('eng+chi_sim');
+    await worker.initialize('eng+chi_sim');
     await worker.setParameters({
       tessedit_char_whitelist: '0123456789.$%/,-:. ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
       tessedit_pageseg_mode: '11', 
     });
 
-    const res = await worker.recognize(processedBlob, {}, {
-      logger: m => {
-        if (m.status === 'recognizing text') {
-          const p = Math.round(m.progress * 100);
-          bar.style.width = p + '%';
-          msg.textContent = `Deep Scanning UI… ${p}%`;
-        }
-      }
-    });
-
+    const res = await worker.recognize(processedBlob);
     await worker.terminate();
 
     msg.textContent = 'Analysis complete ✓';
@@ -403,7 +411,7 @@ async function runOCR() {
     renderCards(analysis, txt);
   } catch (err) {
     console.error(err);
-    msg.textContent = 'Scan Error: ' + err.message;
+    msg.textContent = 'Error: ' + err.message;
     dot.classList.remove('on');
   }
 }
@@ -460,7 +468,7 @@ function extractDates(text){
     {
       re: /\b(20\d{2})\.(\d{1,2})\.(\d{1,2})\b/g,
       fn: m => new Date(`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`)
-    }, // Fixed missing comma here
+    }, // Comma fixed here
     {re:/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/g, fn:m=>new Date(`${m[3].length===2?'20'+m[3]:m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`)},
     {re:/\b(20\d{2})[\/\-](\d{1,2})[\/\-](\d{1,2})\b/g, fn:m=>new Date(`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`)},
   ];
@@ -593,13 +601,14 @@ function buildReport(){
   goTab('rep');
 }
 
-// ── Shared Actions (Copy/Notes) ───────────────────────────────────
-async function handleShare(customText) {
+// ── Shared Output Logic (Copy & Notes) ───────────────────────────
+async function handleExport(customText) {
   const txt = customText || reportText;
   if (!txt) return;
 
   const shareData = { title: 'ScreenScan Report', text: txt };
 
+  // 1. Web Share API (Best for mobile 'Notes')
   if (navigator.canShare && navigator.canShare(shareData)) {
     try {
       await navigator.share(shareData);
@@ -610,23 +619,23 @@ async function handleShare(customText) {
     }
   }
 
-  // Fallback Download
+  // 2. Fallback: Download as File
   const blob = new Blob([txt], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `ScreenScan_${new Date().getTime()}.txt`;
+  a.download = `ScreenScan_Report_${new Date().getTime()}.txt`;
   a.click();
   URL.revokeObjectURL(url);
   showToast('Downloaded as .txt');
 }
 
-document.getElementById('btn-copy').addEventListener('click', () => handleShare());
+document.getElementById('btn-copy').addEventListener('click', () => handleExport());
 document.getElementById('btn-notes').addEventListener('click', () => {
   const now = new Date();
-  const dateStr = now.toLocaleDateString('zh-CN', {year:'numeric', month:'2-digit', day:'2-digit'});
+  const dateStr = now.toLocaleDateString('zh-CN');
   const fullText = `ScreenScan 分析报告 ${dateStr}\n${'='.repeat(30)}\n\n${reportText}`;
-  handleShare(fullText);
+  handleExport(fullText);
 });
 
 function showToast(msg) {
