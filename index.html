@@ -6,85 +6,80 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ScreenScan">
-<meta name="theme-color" content="#060606">
 <title>ScreenScan</title>
 <link rel="manifest" id="pwa-manifest">
-<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='38' fill='%23060606'/><text x='28' y='130' font-size='100' fill='%23f0a500'>◈</text></svg>">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap');
 :root {
   --bg: #060606; --s1: #0d0d0d; --s2: #141414; --bd: #1c1c1c; --bd2: #282828;
-  --gold: #f0a500; --up: #00d49c; --dn: #ff3d5a; --flat: #64748b;
-  --tx: #c8c8c8; --tx2: #484848; --safe-b: env(safe-area-inset-bottom, 0px);
-  --safe-t: env(safe-area-inset-top, 0px); --mono: 'IBM Plex Mono', monospace;
+  --gold: #f0a500; --up: #00d49c; --dn: #ff3d5a; --tx: #c8c8c8; --tx2: #484848;
 }
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;background:var(--bg);color:var(--tx);font-family:var(--mono);overflow:hidden}
-#app{display:flex;flex-direction:column;height:100dvh;height:100vh}
-#content{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
-.tab{display:none;padding:18px 16px 24px}
-.tab.on{display:block}
-header{padding:14px 18px 12px;padding-top:calc(14px + var(--safe-t));border-bottom:1px solid var(--bd);display:flex;align-items:center;justify-content:space-between;background:var(--bg);}
-.logo{font-size:11px;font-weight:600;letter-spacing:.3em;color:var(--gold)}
-.pulse{width:6px;height:6px;border-radius:50%;background:var(--tx2)}
-.pulse.on{background:var(--up);animation:blink 2s infinite}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
-nav{display:flex;border-top:1px solid var(--bd);background:var(--bg);padding-bottom:var(--safe-b);}
-.nb{flex:1;padding:11px 0 9px;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--tx2);font-size:8px;letter-spacing:.18em;cursor:pointer;}
-.nb.on{color:var(--gold)}
-.btn{width:100%;padding:11px;border:1px solid var(--bd2);border-radius:2px;background:var(--s1);color:var(--tx);font-family:var(--mono);font-size:10px;cursor:pointer;}
-.btn.gold{border-color:var(--gold);color:var(--gold)}
-.dz{border:1px dashed var(--bd2);border-radius:3px;padding:36px 16px;text-align:center;cursor:pointer;}
-#preview-wrap{margin-top:16px;display:none}
-#ocr-box{margin-top:12px;padding:10px 12px;background:var(--s1);border:1px solid var(--bd);border-radius:2px;font-size:10px;color:var(--tx2);display:none;}
-#result-wrap{margin-top:18px;display:none}
-.copy-btn{width:100%;margin-top:14px;padding:13px;background:var(--gold);color:#000;border:none;border-radius:2px;font-family:var(--mono);font-size:11px;font-weight:600;cursor:pointer;}
-#toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#1f1f1f;border:1px solid #f0a500;color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .3s;z-index:9999;}
+* { box-sizing:border-box; margin:0; padding:0; }
+html, body { height:100%; background:var(--bg); color:var(--tx); font-family:'IBM Plex Mono', monospace; overflow:hidden; }
+#app { display:flex; flex-direction:column; height:100vh; }
+#content { flex:1; overflow-y:auto; padding:16px; }
+.tab { display:none; }
+.tab.on { display:block; }
+header { padding:14px 18px; border-bottom:1px solid var(--bd); display:flex; justify-content:space-between; align-items:center; background:var(--bg); }
+.logo { font-size:11px; font-weight:600; letter-spacing:.3em; color:var(--gold); }
+.btn { width:100%; padding:12px; background:var(--s1); border:1px solid var(--bd2); color:var(--tx); font-size:10px; cursor:pointer; margin-top:8px; }
+.btn.gold { background:var(--gold); color:#000; border-color:var(--gold); }
+.dz { border:2px dashed var(--bd2); padding:40px 20px; text-align:center; cursor:pointer; margin-bottom:16px; }
+#preview-wrap { margin-top:16px; display:none; }
+#prev-img { width:100%; border:1px solid var(--bd); }
+#ocr-box { margin:12px 0; padding:12px; background:var(--s1); border:1px solid var(--bd); font-size:11px; display:none; }
+#result-wrap { margin-top:20px; display:none; }
+.cards { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.card { background:var(--s1); border:1px solid var(--bd); padding:10px; font-size:11px; }
+.copy-btn { width:100%; padding:14px; background:var(--gold); color:#000; border:none; font-weight:600; margin-top:12px; cursor:pointer; }
+#toast { position:fixed; bottom:40px; left:50%; transform:translateX(-50%); background:#1f1f1f; border:1px solid var(--gold); color:#fff; padding:12px 20px; border-radius:8px; opacity:0; transition:opacity .3s; z-index:1000; white-space:nowrap; }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <div class="logo">◈ SCREENSCAN</div>
-    <div class="pulse" id="dot"></div>
+    <div class="logo">SCREENSCAN</div>
+    <div class="pulse" id="dot" style="width:8px;height:8px;border-radius:50%;background:#484848;"></div>
   </header>
+
   <div id="content">
+    <!-- SCAN TAB -->
     <div class="tab on" id="tab-scan">
-      <div class="dz" id="dz"><div class="dz-ico">⬡</div><p>Drop screenshot here<br><span>tap to upload · or use buttons</span></p></div>
-      <div class="btn-grid">
-        <button class="btn" id="btn-cam">CAMERA</button>
-        <button class="btn" id="btn-up">UPLOAD</button>
-        <button class="btn gold full" id="btn-run" style="display:none">▶ ANALYZE</button>
-      </div>
+      <div class="dz" id="dz">Tap to upload screenshot or use buttons below</div>
+      <button class="btn" id="btn-cam">📷 CAMERA</button>
+      <button class="btn" id="btn-up">📁 UPLOAD IMAGE</button>
+      <button class="btn gold" id="btn-run" style="display:none">▶ ANALYZE CHART</button>
+
       <div id="preview-wrap"><img id="prev-img" alt="Preview"></div>
+
       <div id="ocr-box">
         <span id="ocr-msg">Initializing OCR...</span>
-        <div id="ocr-bar"></div>
+        <div id="ocr-bar" style="height:3px;background:var(--gold);width:0%;margin-top:8px;"></div>
       </div>
+
       <div id="result-wrap">
-        <div class="sec-lbl">Extracted Metrics</div>
+        <div style="font-size:10px;color:#666;margin-bottom:8px;">EXTRACTED METRICS</div>
         <div class="cards">
-          <div class="card"><div class="lbl">TREND</div><div class="val" id="d-trend">—</div></div>
-          <div class="card"><div class="lbl">DAYS COVERED</div><div class="val" id="d-days">—</div></div>
-          <div class="card"><div class="lbl">CURRENT PRICE</div><div class="val gold" id="d-cur">—</div></div>
-          <div class="card"><div class="lbl">DELTA L→H</div><div class="val up" id="d-delta">—</div></div>
-          <div class="card"><div class="lbl">LOWEST</div><div class="val dn" id="d-lo">—</div><div class="sub" id="d-lo-dt">—</div></div>
-          <div class="card"><div class="lbl">HIGHEST</div><div class="val up" id="d-hi">—</div><div class="sub" id="d-hi-dt">—</div></div>
-          <div class="card full"><div class="lbl">RAW OCR TEXT</div><div class="raw" id="d-raw">—</div></div>
+          <div class="card"><div style="color:#666;font-size:9px;">TREND</div><div class="val" id="d-trend">—</div></div>
+          <div class="card"><div style="color:#666;font-size:9px;">DAYS</div><div class="val" id="d-days">—</div></div>
+          <div class="card"><div style="color:#666;font-size:9px;">PRICE</div><div class="val gold" id="d-cur">—</div></div>
+          <div class="card"><div style="color:#666;font-size:9px;">DELTA</div><div class="val up" id="d-delta">—</div></div>
         </div>
-        <button class="btn gold full" id="btn-gen">⚑ GENERATE REPORT</button>
+        <button class="btn gold" id="btn-gen">GENERATE REPORT</button>
       </div>
     </div>
 
-    <!-- CONDITIONS and REPORT tabs unchanged for brevity - keep them from your file -->
-    <!-- (copy the entire CONDITIONS and REPORT sections from your previous code here) -->
-
+    <!-- REPORT TAB (simplified for speed) -->
+    <div class="tab" id="tab-rep">
+      <div id="r-empty" style="text-align:center;padding:80px 20px;color:#666;">No report yet.<br>Analyze an image first.</div>
+      <div id="r-out" style="display:none;">
+        <div style="color:var(--gold);font-weight:600;margin-bottom:12px;">ANALYSIS REPORT</div>
+        <div id="r-rows" style="font-size:12px;line-height:1.6;"></div>
+        <button class="copy-btn" id="btn-copy">COPY TO CLIPBOARD</button>
+        <button class="copy-btn" id="btn-notes" style="margin-top:8px;">📝 SAVE TO NOTES</button>
+      </div>
+    </div>
   </div>
-  <nav>
-    <button class="nb on" data-tab="scan">SCAN</button>
-    <button class="nb" data-tab="cond">CONDITIONS</button>
-    <button class="nb" data-tab="rep">REPORT</button>
-  </nav>
 </div>
 
 <input type="file" id="f-up" accept="image/*">
@@ -92,75 +87,157 @@ nav{display:flex;border-top:1px solid var(--bd);background:var(--bg);padding-bot
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
-// ... (PWA manifest, state, navigation, image loading functions remain the same as your code)
+// State
+let imgData = null;
+let analysis = null;
+let reportText = '';
+let worker = null;
 
-// Faster & minimal OCR
+// Simple tab switch (only scan and report for minimal version)
+function showTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  document.getElementById('tab-' + tab).classList.add('on');
+}
+
+// Image load
+function loadImg(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    imgData = e.target.result;
+    document.getElementById('prev-img').src = imgData;
+    document.getElementById('preview-wrap').style.display = 'block';
+    document.getElementById('btn-run').style.display = 'block';
+    document.getElementById('result-wrap').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+// OCR Setup - Fast & Minimal
 async function initTesseract() {
   if (worker) return worker;
   worker = await Tesseract.createWorker({
     logger: m => {
       if (m.status === 'recognizing text') {
-        const p = Math.round(m.progress * 100);
-        document.getElementById('ocr-msg').textContent = `Scanning… ${p}%`;
-        document.getElementById('ocr-bar').style.width = p + '%';
+        const progress = Math.round(m.progress * 100);
+        document.getElementById('ocr-msg').textContent = `Scanning... ${progress}%`;
       }
     }
   });
-  // Use only English for maximum speed (add '+chi_sim' later if needed)
   await worker.loadLanguage('eng');
   await worker.initialize('eng');
   await worker.setParameters({
-    tessedit_pageseg_mode: Tesseract.PSM.AUTO,
-    tessedit_ocr_engine_mode: Tesseract.OEM.TESSERACT_ONLY,
+    tessedit_pageseg_mode: 3,        // PSM.AUTO = 3
+    tessedit_ocr_engine_mode: 0,     // OEM.TESSERACT_ONLY = 0 (fast legacy)
     tessedit_char_whitelist: '0123456789.%+-',
   });
   return worker;
 }
 
-// Completely skip preprocessing
 async function preprocessImage(dataUrl) {
-  return dataUrl;   // No enhancement at all
+  return dataUrl; // No preprocessing - instant
 }
 
-document.getElementById('btn-run').addEventListener('click', runOCR);
-
-async function runOCR(){
-  if(!imgData) return;
+document.getElementById('btn-run').addEventListener('click', async () => {
+  if (!imgData) return;
 
   const box = document.getElementById('ocr-box');
   const msg = document.getElementById('ocr-msg');
-  const bar = document.getElementById('ocr-bar');
   const dot = document.getElementById('dot');
 
   box.style.display = 'block';
-  bar.style.width = '0%';
-  dot.classList.add('on');
-  msg.textContent = 'Initializing OCR...';   // Changed message
+  dot.style.background = '#00d49c';
+  msg.textContent = 'Initializing OCR...';
 
   try {
     const w = await initTesseract();
     msg.textContent = 'Recognizing text...';
-    
-    const enhanced = await preprocessImage(imgData);   // Now instant
-    const result = await w.recognize(enhanced);
 
-    msg.textContent = 'Analysis complete ✓';
-    dot.classList.remove('on');
+    const result = await w.recognize(await preprocessImage(imgData));
+
+    msg.textContent = 'Done ✓';
+    dot.style.background = '#484848';
 
     const rawText = result.data.text.trim();
     analysis = analyzeText(rawText);
-    renderCards(analysis, rawText);
+    renderResult(analysis, rawText);
 
   } catch (err) {
-    console.error(err);
     msg.textContent = 'Error: ' + err.message;
-    dot.classList.remove('on');
+    console.error(err);
   }
+});
+
+// Simple analysis
+function analyzeText(text) {
+  const prices = [...text.matchAll(/\b(\d{1,8}(?:\.\d{1,4})?)\b/g)].map(m => parseFloat(m[1])).filter(n => n > 0.01);
+  return {
+    cur: prices.length ? prices[prices.length-1] : null,
+    lo: prices.length ? Math.min(...prices) : null,
+    hi: prices.length ? Math.max(...prices) : null,
+    raw: text
+  };
 }
 
-// Keep the rest of your functions (analyzeText, extractPrices, buildReport, saveToNotes, etc.) exactly as they are in your code
-// ... paste the rest of your script here (from // Analysis Engine down to the end)
+function renderResult(r, raw) {
+  document.getElementById('d-cur').textContent = r.cur ? '$' + r.cur.toFixed(2) : '—';
+  document.getElementById('d-lo').textContent = r.lo ? '$' + r.lo.toFixed(2) : '—';
+  document.getElementById('d-hi').textContent = r.hi ? '$' + r.hi.toFixed(2) : '—';
+  document.getElementById('d-raw').textContent = raw.substring(0, 300) + (raw.length > 300 ? '...' : '');
+  document.getElementById('result-wrap').style.display = 'block';
+}
 
+// Report
+document.getElementById('btn-gen').addEventListener('click', () => {
+  if (!analysis) return;
+  reportText = `SCREENSCAN REPORT\n\nCurrent: ${analysis.cur || '—'}\nLow: ${analysis.lo || '—'}\nHigh: ${analysis.hi || '—'}\n\nRaw: ${analysis.raw.substring(0,500)}`;
+  document.getElementById('r-rows').innerHTML = `<pre style="white-space:pre-wrap;font-size:12px;">${reportText}</pre>`;
+  document.getElementById('r-empty').style.display = 'none';
+  document.getElementById('r-out').style.display = 'block';
+  showTab('rep');
+});
+
+// Copy & Notes
+document.getElementById('btn-copy').addEventListener('click', () => {
+  if (reportText) navigator.clipboard.writeText(reportText).then(() => showToast('Copied!'));
+});
+
+document.getElementById('btn-notes').addEventListener('click', () => {
+  if (!reportText) return showToast('No report yet');
+  const title = `ScreenScan Report ${new Date().toLocaleDateString()}`;
+  if (navigator.share) {
+    navigator.share({title, text: reportText});
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([reportText], {type: 'text/plain'}));
+    a.download = title + '.txt';
+    a.click();
+    showToast('Downloaded');
+  }
+});
+
+function showToast(msg) {
+  let t = document.getElementById('toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'toast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = 1;
+  setTimeout(() => t.style.opacity = 0, 2000);
+}
+
+// File inputs
+document.getElementById('dz').addEventListener('click', () => document.getElementById('f-up').click());
+document.getElementById('btn-up').addEventListener('click', () => document.getElementById('f-up').click());
+document.getElementById('btn-cam').addEventListener('click', () => document.getElementById('f-cam').click());
+
+['f-up', 'f-cam'].forEach(id => {
+  document.getElementById(id).addEventListener('change', e => {
+    if (e.target.files[0]) loadImg(e.target.files[0]);
+    e.target.value = '';
+  });
+});
 </script>
 </body>
 </html>
