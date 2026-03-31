@@ -396,7 +396,6 @@ async function preprocessImage(dataUrl) {
 
 document.getElementById('btn-run').addEventListener('click', runOCR);
 
-  
 async function runOCR() {
   if (!imgData) return;
   const box = document.getElementById('ocr-box');
@@ -409,30 +408,30 @@ async function runOCR() {
   dot.classList.add('on');
 
   try {
-    // 1. Pre-process the image via Canvas (Grayscale + Contrast)
+    // 1. Process for Dark Mode & Small Text
     const processedBlob = await preprocessImage(imgData);
     
-    const worker = await Tesseract.createWorker('eng', 1, {
+    // 2. Add 'chi_sim' to handle the Chinese labels in the screenshot
+    const worker = await Tesseract.createWorker(['eng', 'chi_sim'], 1, {
       logger: m => {
         if (m.status === 'recognizing text') {
           const p = Math.round(m.progress * 100);
           bar.style.width = p + '%';
-          msg.textContent = `Analyzing UI… ${p}%`;
+          msg.textContent = `Deep Scanning UI… ${p}%`;
         }
       }
     });
 
-    // 2. Set Parameters for Financial UI
     await worker.setParameters({
-      tessedit_char_whitelist: '0123456789.$%/,-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ',
-      // PSM 11 is "Sparse Text" - best for finding numbers scattered on a screen
-      tessedit_pageseg_mode: '11', 
+      // Expanded whitelist to include common Chinese punctuation if needed
+      tessedit_char_whitelist: '0123456789.$%/,-:. ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+      tessedit_pageseg_mode: '11', // Sparse text is still best for floating chart numbers
     });
 
     const res = await worker.recognize(processedBlob);
     await worker.terminate();
 
-    msg.textContent = 'Scan Complete ✓';
+    msg.textContent = 'Analysis complete ✓';
     dot.classList.remove('on');
     
     const txt = res.data.text;
@@ -444,27 +443,30 @@ async function runOCR() {
   }
 }
 
-// ── Image Processing Helper ──────────────────────────────────────
+// ── Advanced Pre-processing for Mobile Screenshots ────────────────
 function preprocessImage(dataUrl) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      
+      // 3. Upscale x2: This helps Tesseract "see" small indicator values
+      canvas.width = img.width * 2;
+      canvas.height = img.height * 2;
 
-      // Draw and apply filters
-      ctx.filter = 'grayscale(1) contrast(2) brightness(1.2)';
-      ctx.drawImage(img, 0, 0);
+      // 4. Invert + Grayscale + High Contrast
+      // This turns your dark chart into black text on a white background
+      ctx.filter = 'invert(1) grayscale(1) contrast(4) brightness(1.1)';
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      // Convert to blob for Tesseract
-      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.9);
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.95);
     };
     img.src = dataUrl;
   });
-}
-// Keep all your original functions below unchanged
+}  
+
+  // Keep all your original functions below unchanged
 // (analyzeText, extractPrices, extractDates, renderCards, buildReport, loadCond, getCond, saveToNotes, showToast, etc.)
 
 // ── Analysis Engine (your original) ──────────────────────────────
@@ -518,6 +520,11 @@ function extractPrices(text) {
 function extractDates(text){
   const ds=[];
   const rules=[
+   
+{
+  re: /\b(20\d{2})\.(\d{1,2})\.(\d{1,2})\b/g,
+  fn: m => new Date(`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`)
+}
     {re:/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\b/g, fn:m=>new Date(`${m[3].length===2?'20'+m[3]:m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`)},
     {re:/\b(20\d{2})[\/\-](\d{1,2})[\/\-](\d{1,2})\b/g, fn:m=>new Date(`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`)},
   ];
