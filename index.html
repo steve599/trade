@@ -402,34 +402,6 @@ function loadImg(file){
   };
   r.readAsDataURL(file);
 }
-function preprocessImage(imgSrc){
-  return new Promise(resolve=>{
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-
-      canvas.width = img.width;
-      canvas.height = img.height;
-
-      ctx.drawImage(img,0,0);
-
-      // Convert to grayscale + increase contrast
-      const imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
-      const data = imgData.data;
-
-      for(let i=0;i<data.length;i+=4){
-        const avg = (data[i]+data[i+1]+data[i+2])/3;
-        const val = avg > 140 ? 255 : 0; // threshold
-        data[i]=data[i+1]=data[i+2]=val;
-      }
-
-      ctx.putImageData(imgData,0,0);
-      resolve(canvas.toDataURL());
-    };
-    img.src = imgSrc;
-  });
-}
 
 // ── OCR + Analysis ───────────────────────────────────────────────
 document.getElementById('btn-run').addEventListener('click',runOCR);
@@ -437,52 +409,49 @@ document.getElementById('btn-run').addEventListener('click',runOCR);
 // ── Enhanced OCR with Pre-processing ──────────────────────────────
 async function runOCR() {
   if (!imgData) return;
+
   const box = document.getElementById('ocr-box');
   const msg = document.getElementById('ocr-msg');
   const bar = document.getElementById('ocr-bar');
   const dot = document.getElementById('dot');
 
-const processed = await preprocessImage(imgData);
-
-const res = await Tesseract.recognize(processed,'eng',{
-
-  
-  box.style.display = 'block'; 
-  bar.style.width = '0%'; 
+  box.style.display = 'block';
+  bar.style.width = '0%';
   dot.classList.add('on');
 
   try {
-    // 1. Pre-process the image via Canvas (Grayscale + Contrast)
     const processedBlob = await preprocessImage(imgData);
-    
-    const worker = await Tesseract.createWorker('eng', 1, {
+
+    const worker = await Tesseract.createWorker({
       logger: m => {
         if (m.status === 'recognizing text') {
           const p = Math.round(m.progress * 100);
           bar.style.width = p + '%';
-          msg.textContent = `Analyzing UI… ${p}%`;
+          msg.textContent = `Scanning… ${p}%`;
         }
       }
     });
 
-    // 2. Set Parameters for Financial UI
+    await worker.loadLanguage('eng');
+    await worker.initialize('eng');
+
     await worker.setParameters({
-      tessedit_char_whitelist: '0123456789.$%/,-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ',
-      // PSM 11 is "Sparse Text" - best for finding numbers scattered on a screen
-      tessedit_pageseg_mode: '11', 
+      tessedit_char_whitelist: '0123456789.$%/,-',
+      tessedit_pageseg_mode: 11
     });
 
     const res = await worker.recognize(processedBlob);
     await worker.terminate();
 
-    msg.textContent = 'Scan Complete ✓';
+    msg.textContent = 'Analysis complete ✓';
     dot.classList.remove('on');
-    
+
     const txt = res.data.text;
     analysis = analyzeText(txt);
     renderCards(analysis, txt);
+
   } catch (err) {
-    msg.textContent = 'Scan Error: ' + err.message;
+    msg.textContent = 'Error: ' + err.message;
     dot.classList.remove('on');
   }
 }
@@ -546,16 +515,16 @@ function analyzeText(text){
 }
 
 function extractPrices(text) {
-  // Matches digits that might have commas or dots, specifically looking for money patterns
-  const re=/\$?\s*\d{1,6}(?:,\d{3})*(?:\.\d{2})/g;
+  const re = /\$?\s*\d{1,6}(?:,\d{3})*(?:\.\d{2})/g;
   const found = [];
   let m;
+
   while ((m = re.exec(text)) !== null) {
-    // Normalize: remove commas and treat the last dot/comma as decimal
-    let val = m[1].replace(/,/g, ''); 
+    const val = m[0].replace(/[$,\s]/g, '');
     const n = parseFloat(val);
-    if (n > 0.01) found.push(n);
+    if (!isNaN(n) && n > 0.01) found.push(n);
   }
+
   return found;
 }
 
