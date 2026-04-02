@@ -433,9 +433,9 @@ function splitRegions(dataUrl) {
       };
 
       resolve({
-        top: makeRegion(0.0, 0.20),
-        mid: makeRegion(0.60, 0.82),
-        bot: makeRegion(0.82, 1.0)
+        top: makeRegion(0.0, 0.22),
+        mid: makeRegion(0.55, 0.78),
+        bot: makeRegion(0.78, 1.0)
       });
     };
     img.src = dataUrl;
@@ -535,49 +535,35 @@ function analyzeStructured(top, mid, bot) {
     out.deltaPct = (out.delta / out.lo) * 100;
   }
 
-  // --- TREND (MA primary, RSI fallback) ---
-const maMatches = [...top.matchAll(/(\d{4}\.\d{2})/g)].map(m => Number(m[1]));
-const rsiVals = (mid.match(/\d{1,2}\.\d{2}/g) || []).map(Number);
-
-let trendSet = false;
-
-// MA FIRST (primary signal)
-if (maMatches.length >= 3) {
-  if (maMatches[0] > maMatches[1] && maMatches[1] > maMatches[2]) {
-    out.trend = 'up';
-    trendSet = true;
-  } else if (maMatches[0] < maMatches[1]) {
-    out.trend = 'down';
-    trendSet = true;
+  // --- RSI ---
+  const rsiVals = (mid.match(/\d{1,2}\.\d{2}/g) || []).map(Number);
+  if (rsiVals.length) {
+    const rsi = rsiVals[rsiVals.length - 1];
+    if (rsi > 70) out.trend = 'down';
+else if (rsi < 30) out.trend = 'up';
   }
-}
 
-// RSI ONLY if no MA signal
-if (!trendSet && rsiVals.length) {
-  const rsi = rsiVals[rsiVals.length - 1];
-  if (rsi > 70) out.trend = 'down';
-  else if (rsi < 30) out.trend = 'up';
-}
+  // --- TREND (MA stacking) ---
+  const maMatches = [...top.matchAll(/(\d{4}\.\d{2})/g)].map(m => Number(m[1]));
+
+  if (maMatches.length >= 3) {
+    if (maMatches[0] > maMatches[1] && maMatches[1] > maMatches[2]) {
+      out.trend = 'up';
+    } else if (maMatches[0] < maMatches[1]) {
+      out.trend = 'down';
+    }
+  }
 
   // --- DAYS ---
- const dateMatches = top.match(/(\d{4})?\.(\d{1,2})\.(\d{1,2})/g);
+  const dateMatches = top.match(/20\d{2}[.\-/]\d{1,2}[.\-/]\d{1,2}/g);
+  if (dateMatches && dateMatches.length >= 2) {
+    const d1 = new Date(dateMatches[0].replace(/\./g, '-'));
+    const d2 = new Date(dateMatches[dateMatches.length - 1].replace(/\./g, '-'));
+    out.days = Math.abs((d2 - d1) / (1000 * 60 * 60 * 24));
+  }
 
-if (dateMatches && dateMatches.length >= 2) {
-  const parse = (s, fallbackYear = 2026) => {
-    const parts = s.split('.');
-    if (parts.length === 3) {
-      return new Date(`${parts[0]}-${parts[1]}-${parts[2]}`);
-    } else {
-      return new Date(`${fallbackYear}-${parts[0]}-${parts[1]}`);
-    }
-  };
-
-  const d1 = parse(dateMatches[0]);
-  const d2 = parse(dateMatches[dateMatches.length - 1]);
-
-  out.days = Math.abs((d2 - d1) / (1000 * 60 * 60 * 24));
+  return out;
 }
-
 function extractPrices(text) {
   // Matches digits that might have commas or dots, specifically looking for money patterns
   const re = /(?:^|\s)\$?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2,4})?)(?!\w)/g;
