@@ -515,7 +515,7 @@ async function runOCR() {
 function analyzeStructured(top, mid, bot) {
   const out = {
     trend: 'Neutral',
-    days: null,
+    days: 0,
     cur: null,
     lo: null,
     hi: null,
@@ -523,47 +523,61 @@ function analyzeStructured(top, mid, bot) {
     deltaPct: null
   };
 
-  // --- PRICES ---
-  const prices = (bot.match(/\d{4,5}/g) || []).map(Number);
+  // --- 1. PRICES ---
+  // Improved regex to capture decimals if present
+  const prices = (bot.match(/\d+(\.\d+)?/g) || []).map(Number);
 
-  if (prices.length) {
-    out.cur = prices.filter(p => p > 8000).slice(-1)[0];
+  if (prices.length > 0) {
+    // Removed the > 8000 filter to support all asset classes
+    out.cur = prices[prices.length - 1];
     out.hi = Math.max(...prices);
     out.lo = Math.min(...prices);
 
     out.delta = out.hi - out.lo;
-    out.deltaPct = (out.delta / out.lo) * 100;
+    // Guard against division by zero
+    out.deltaPct = out.lo !== 0 ? (out.delta / out.lo) * 100 : 0;
   }
 
-  // --- RSI ---
+  // --- 2. TREND (RSI vs MA Logic) ---
+  let rsiTrend = null;
   const rsiVals = (mid.match(/\d{1,2}\.\d{2}/g) || []).map(Number);
+  
   if (rsiVals.length) {
     const rsi = rsiVals[rsiVals.length - 1];
-    if (rsi > 70) out.trend = 'down';
-else if (rsi < 30) out.trend = 'up';
+    if (rsi > 70) rsiTrend = 'down';      // Overbought -> Expecting reversal
+    else if (rsi < 30) rsiTrend = 'up';   // Oversold -> Expecting reversal
   }
 
-  // --- TREND (MA stacking) ---
   const maMatches = [...top.matchAll(/(\d{4}\.\d{2})/g)].map(m => Number(m[1]));
+  let maTrend = null;
 
   if (maMatches.length >= 3) {
-    if (maMatches[0] > maMatches[1] && maMatches[1] > maMatches[2]) {
-      out.trend = 'up';
-    } else if (maMatches[0] < maMatches[1]) {
-      out.trend = 'down';
+    const [short, midMA, long] = maMatches;
+    if (short > midMA && midMA > long) {
+      maTrend = 'up';
+    } else if (short < midMA && midMA < long) {
+      maTrend = 'down';
     }
   }
 
-  // --- DAYS ---
+  // Conflict Resolution: Prioritize MA for trend, use RSI as a secondary signal
+  out.trend = maTrend || rsiTrend || 'Neutral';
+
+  // --- 3. DAYS ---
   const dateMatches = top.match(/20\d{2}[.\-/]\d{1,2}[.\-/]\d{1,2}/g);
   if (dateMatches && dateMatches.length >= 2) {
-    const d1 = new Date(dateMatches[0].replace(/\./g, '-'));
-    const d2 = new Date(dateMatches[dateMatches.length - 1].replace(/\./g, '-'));
-    out.days = Math.abs((d2 - d1) / (1000 * 60 * 60 * 24));
+    // Normalize date strings to YYYY-MM-DD for cross-browser reliability
+    const parseDate = (str) => new Date(str.replace(/\./g, '-'));
+    const d1 = parseDate(dateMatches[0]);
+    const d2 = parseDate(dateMatches[dateMatches.length - 1]);
+    
+    const diffTime = Math.abs(d2 - d1);
+    out.days = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   }
 
   return out;
 }
+
 function extractPrices(text) {
   // Matches digits that might have commas or dots, specifically looking for money patterns
   const re = /(?:^|\s)\$?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2,4})?)(?!\w)/g;
