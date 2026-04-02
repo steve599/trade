@@ -406,73 +406,33 @@ function loadImg(file){
 // ── OCR + Analysis ───────────────────────────────────────────────
 document.getElementById('btn-run').addEventListener('click',runOCR);
 
-// ── Enhanced OCR with Pre-processing ──────────────────────────────
-async function runOCR() {
-  if (!imgData) return;
-  const box = document.getElementById('ocr-box');
-  const msg = document.getElementById('ocr-msg');
-  const bar = document.getElementById('ocr-bar');
-  const dot = document.getElementById('dot');
-  
-  box.style.display = 'block'; 
-  bar.style.width = '0%'; 
-  dot.classList.add('on');
+async function runOCR(){
+  if(!imgData) return;
+  const box=document.getElementById('ocr-box');
+  const msg=document.getElementById('ocr-msg');
+  const bar=document.getElementById('ocr-bar');
+  const dot=document.getElementById('dot');
+  box.style.display='block'; bar.style.width='0%'; dot.classList.add('on');
 
-  try {
-    // 1. Pre-process the image via Canvas (Grayscale + Contrast)
-    const processedBlob = await preprocessImage(imgData);
-    
-    const worker = await Tesseract.createWorker('eng', 1, {
-      logger: m => {
-        if (m.status === 'recognizing text') {
-          const p = Math.round(m.progress * 100);
-          bar.style.width = p + '%';
-          msg.textContent = `Analyzing UI… ${p}%`;
+  try{
+    const res=await Tesseract.recognize(imgData,'eng',{
+      logger:m=>{
+        if(m.status==='recognizing text'){
+          const p=Math.round(m.progress*100);
+          bar.style.width=p+'%';
+          msg.textContent='Scanning… '+p+'%';
         }
       }
     });
-
-    // 2. Set Parameters for Financial UI
-    await worker.setParameters({
-      tessedit_char_whitelist: '0123456789.$%/,-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ',
-      // PSM 11 is "Sparse Text" - best for finding numbers scattered on a screen
-      tessedit_pageseg_mode: '11', 
-    });
-
-    const res = await worker.recognize(processedBlob);
-    await worker.terminate();
-
-    msg.textContent = 'Scan Complete ✓';
+    msg.textContent='Analysis complete ✓';
     dot.classList.remove('on');
-    
-    const txt = res.data.text;
-    analysis = analyzeText(txt);
-    renderCards(analysis, txt);
-  } catch (err) {
-    msg.textContent = 'Scan Error: ' + err.message;
+    const txt=res.data.text;
+    analysis=analyzeText(txt);
+    renderCards(analysis,txt);
+  }catch(err){
+    msg.textContent='Error: '+err.message;
     dot.classList.remove('on');
   }
-}
-
-// ── Image Processing Helper ──────────────────────────────────────
-function preprocessImage(dataUrl) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      canvas.width = img.width;
-      canvas.height = img.height;
-
-      // Draw and apply filters
-      ctx.filter = 'grayscale(1) contrast(2) brightness(1.2)';
-      ctx.drawImage(img, 0, 0);
-
-      // Convert to blob for Tesseract
-      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.9);
-    };
-    img.src = dataUrl;
-  });
 }
 
 // ── Analysis Engine ──────────────────────────────────────────────
@@ -512,16 +472,13 @@ function analyzeText(text){
   return out;
 }
 
-function extractPrices(text) {
-  // Matches digits that might have commas or dots, specifically looking for money patterns
-  const re = /(?:^|\s)\$?(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2,4})?)(?!\w)/g;
-  const found = [];
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    // Normalize: remove commas and treat the last dot/comma as decimal
-    let val = m[1].replace(/,/g, ''); 
-    const n = parseFloat(val);
-    if (n > 0.01) found.push(n);
+function extractPrices(text){
+  // Match standalone decimal numbers; filter years & trivially small integers
+  const re=/(?<!\w)\$?\s*(\d{1,8}(?:,\d{3})*(?:\.\d{1,4})?)(?!\w)/g;
+  const found=[]; let m;
+  while((m=re.exec(text))!==null){
+    const n=parseFloat(m[1].replace(/,/g,''));
+    if(n>0.01 && !(n>=1900&&n<=2100&&!m[1].includes('.'))) found.push(n);
   }
   return found;
 }
@@ -694,52 +651,18 @@ function buildReport(){
 }
 
 // ── Copy ─────────────────────────────────────────────────────────
-document.getElementById('btn-copy').addEventListener('click', async function() {
-  const txt = this.dataset.report || reportText;
-  if (!txt) return;
-
-  const shareData = {
-    title: 'ScreenScan Report',
-    text: txt
-  };
-
-  // 1. Try Web Share API (Primary for mobile 'Notes')
-  if (navigator.canShare && navigator.canShare(shareData)) {
-    try {
-      await navigator.share(shareData);
-      showToast('Shared successfully!');
-      return;
-    } catch (err) {
-      if (err.name !== 'AbortError') console.error('Share failed:', err);
-    }
-  }
-
-  // 2. Fallback: Download as .txt file
-  try {
-    const blob = new Blob([txt], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ScreenScan_Report_${new Date().getTime()}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('Report downloaded as .txt');
-  } catch (err) {
-    // 3. Final Fallback: Traditional Copy to Clipboard
+document.getElementById('btn-copy').addEventListener('click',async function(){
+  const txt=this.dataset.report||reportText;
+  if(!txt) return;
+  try{
     await navigator.clipboard.writeText(txt);
-    showToast('Copied to clipboard');
+  }catch{
+    const ta=Object.assign(document.createElement('textarea'),{value:txt,style:'position:fixed;opacity:0'});
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
   }
+  const el=document.getElementById('copy-ok');
+  el.style.display='block'; setTimeout(()=>el.style.display='none',3000);
 });
-
-// Helper for UI feedback
-function showToast(msg) {
-  const el = document.getElementById('copy-ok');
-  el.textContent = msg;
-  el.style.display = 'block';
-  setTimeout(() => el.style.display = 'none', 3000);
-}
 </script>
 </body>
 </html>
