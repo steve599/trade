@@ -403,141 +403,179 @@ function loadImg(file){
   r.readAsDataURL(file);
 }
 
+// ── Region-Based OCR Split ──────────────────────────────
+function splitRegions(dataUrl) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const makeRegion = (yStart, yEnd) => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        const scale = 2;
+        const h = img.height * (yEnd - yStart);
+
+        canvas.width = img.width * scale;
+        canvas.height = h * scale;
+
+        ctx.imageSmoothingEnabled = false;
+        ctx.filter = 'grayscale(1) contrast(2)';
+
+        ctx.drawImage(
+          img,
+          0, img.height * yStart,
+          img.width, h,
+          0, 0,
+          canvas.width, canvas.height
+        );
+
+        return canvas;
+      };
+
+      resolve({
+        top: makeRegion(0.0, 0.20),
+        mid: makeRegion(0.60, 0.82),
+        bot: makeRegion(0.82, 1.0)
+      });
+    };
+    img.src = dataUrl;
+  });
+}
 // ── OCR + Analysis ───────────────────────────────────────────────
 document.getElementById('btn-run').addEventListener('click',runOCR);
 
 // ── Enhanced OCR with Pre-processing ──────────────────────────────
 async function runOCR() {
   if (!imgData) return;
+
   const box = document.getElementById('ocr-box');
   const msg = document.getElementById('ocr-msg');
   const bar = document.getElementById('ocr-bar');
   const dot = document.getElementById('dot');
-  
-  box.style.display = 'block'; 
-  bar.style.width = '0%'; 
+
+  box.style.display = 'block';
+  bar.style.width = '0%';
   dot.classList.add('on');
 
   try {
-    // 1. Pre-process the image via Canvas (Grayscale + Contrast)
-    const processedBlob = await preprocessImage(imgData);
-    
     const worker = await Tesseract.createWorker('eng', 1, {
       logger: m => {
         if (m.status === 'recognizing text') {
           const p = Math.round(m.progress * 100);
           bar.style.width = p + '%';
-          msg.textContent = `Analyzing UI… ${p}%`;
+          msg.textContent = `Analyzing… ${p}%`;
         }
       }
     });
 
-    // 2. Set Parameters for Financial UI
-    await worker.setParameters({
-      // Re-include common alphanumeric characters for Ticker and Days Covered
-      tessedit_char_whitelist: '0123456789.$%/,-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ',
-      // PSM 3 is robust for structured regions than PSM 11
-      tessedit_pageseg_mode: '3', 
-      preserve_interword_spaces: '1', // Preserve spacing for price columns
-    });
+    // --- REGION OCR ---
+    const regions = await splitRegions(imgData);
 
-    const res = await worker.recognize(processedBlob);
+    // TOP (trend + MA)
+    await worker.setParameters({
+      tessedit_pageseg_mode: '6',
+      tessedit_char_whitelist: '0123456789.:+-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz '
+    });
+    const top = await worker.recognize(regions.top);
+
+    // MIDDLE (RSI)
+    await worker.setParameters({
+      tessedit_pageseg_mode: '7',
+      tessedit_char_whitelist: '0123456789.'
+    });
+    const mid = await worker.recognize(regions.mid);
+
+    // BOTTOM (prices)
+    await worker.setParameters({
+      tessedit_pageseg_mode: '6',
+      tessedit_char_whitelist: '0123456789.'
+    });
+    const bot = await worker.recognize(regions.bot);
+
     await worker.terminate();
+
+    const combinedText =
+      top.data.text + '\n' +
+      mid.data.text + '\n' +
+      bot.data.text;
+
+    analysis = analyzeStructured(top.data.text, mid.data.text, bot.data.text);
+    renderCards(analysis, combinedText);
 
     msg.textContent = 'Scan Complete ✓';
     dot.classList.remove('on');
-    
-    const txt = res.data.text;
-    analysis = analyzeText(txt);
-    renderCards(analysis, txt);
+
   } catch (err) {
     msg.textContent = 'Scan Error: ' + err.message;
     dot.classList.remove('on');
   }
 }
 
-// ── Region-Based Pre-processing for Trading Terminals ──────────────────
-function preprocessImage(dataUrl) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      
-      // Upscale 2x: essential for tiny fonts in the stats section.
-      const scale = 2;
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
+// ── Analysis Engine ──────────────────────────────────────────────
+function analyzeStructured(top, mid, bot) {
+  const out = {
+    trend: 'Neutral',
+    days: null,
+    cur: null,
+    lo: null,
+    hi: null,
+    delta: null,
+    deltaPct: null
+  };
 
-      // Filter Stack: Optimized for light text on dark backgrounds.
-      // 1. Invert colors (Dark background → White).
-      // 2. Max Contrast to sharpen white-text-turned-black.
-      ctx.filter = 'invert(1) grayscale(1) contrast(5) brightness(1.2)';
-      ctx.imageSmoothingEnabled = false; // Sharp edges help OCR.
-      
-      // Draw standard upscaled image.
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  // --- PRICES ---
+  const prices = (bot.match(/\d{4,5}/g) || []).map(Number);
 
-      // --- THE CROP (Crucial Step) ---
-      // We overwrite the messy middle chart area with solid white blocks, 
-      // essentially "cropping" the noisest areas while preserving 
-      // the relative positions of the stats and header.
-      ctx.fillStyle = 'white';
-      
-      // Black out the main candlestick chart area
-      ctx.fillRect(0, img.height * 0.15 * scale, canvas.width, img.height * 0.35 * scale);
-      
-      // Black out the lower RSI grid but keep the numbers
-      ctx.fillRect(0, img.height * 0.55 * scale, canvas.width, img.height * 0.20 * scale);
+  if (prices.length) {
+    out.cur = prices.filter(p => p > 8000).slice(-1)[0];
+    out.hi = Math.max(...prices);
+    out.lo = Math.min(...prices);
 
-      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.9);
-    };
-    img.src = dataUrl;
-  });
+    out.delta = out.hi - out.lo;
+    out.deltaPct = (out.delta / out.lo) * 100;
+  }
+
+  // --- TREND (MA primary, RSI fallback) ---
+const maMatches = [...top.matchAll(/(\d{4}\.\d{2})/g)].map(m => Number(m[1]));
+const rsiVals = (mid.match(/\d{1,2}\.\d{2}/g) || []).map(Number);
+
+let trendSet = false;
+
+// MA FIRST (primary signal)
+if (maMatches.length >= 3) {
+  if (maMatches[0] > maMatches[1] && maMatches[1] > maMatches[2]) {
+    out.trend = 'up';
+    trendSet = true;
+  } else if (maMatches[0] < maMatches[1]) {
+    out.trend = 'down';
+    trendSet = true;
+  }
 }
 
-// ── Analysis Engine ──────────────────────────────────────────────
-function analyzeText(text){
-  const prices=extractPrices(text);
-  const dates=extractDates(text);
-  const out={prices,dates,trend:'Neutral',days:null,lo:null,loDt:null,hi:null,hiDt:null,delta:null,deltaPct:null,cur:null};
-  if(!prices.length) return out;
+// RSI ONLY if no MA signal
+if (!trendSet && rsiVals.length) {
+  const rsi = rsiVals[rsiVals.length - 1];
+  if (rsi > 70) out.trend = 'down';
+  else if (rsi < 30) out.trend = 'up';
+}
 
-  // 1. GREEDY PRICE DETECTION
-  // Target decimals with at least two digits, commonly seen for SOL prices
-  // and stats like 147.28, 153.20.
-  out.cur   = prices[prices.length-1]; // Most prominent/last decimal is usually price
-  out.hi    = Math.max(...prices);
-  out.lo    = Math.min(...prices);
-  out.delta = out.hi - out.lo;
-  out.deltaPct = out.lo>0 ? (out.delta/out.lo)*100 : null;
+  // --- DAYS ---
+ const dateMatches = top.match(/(\d{4})?\.(\d{1,2})\.(\d{1,2})/g);
 
-  // 2. TREND DETECTION
-  // Financial terminal screenshots are cluttered, so we look for simple trend markers.
-  // This looks for a percent with a "+" or "-" nearby.
-  const trendRegex = /[+-]?\d+\.?\d*\%/;
-  const trendMatch = text.match(trendRegex);
-  
-  if (trendMatch) {
-    out.trend = trendMatch[0].startsWith('-') ? 'down' : 'up';
-  } else {
-    // RSI Fallback
-    const rsiMatch = text.match(/RSI.*?(\d{1,3}\.\d{2})/i);
-    if (rsiMatch) {
-      const rsi = parseFloat(rsiMatch[1]);
-      out.trend = rsi > 70 ? 'overbought' : (rsi < 30 ? 'oversold' : 'Neutral');
+if (dateMatches && dateMatches.length >= 2) {
+  const parse = (s, fallbackYear = 2026) => {
+    const parts = s.split('.');
+    if (parts.length === 3) {
+      return new Date(`${parts[0]}-${parts[1]}-${parts[2]}`);
+    } else {
+      return new Date(`${fallbackYear}-${parts[0]}-${parts[1]}`);
     }
-  }
+  };
 
-  // 3. DAYS COVERED (Greedy Search)
-  // Look for common day labels: '24h', '7d', '1D', '30D'
-  const daysRegex = /(\d{1,3})\s*[dD]/; 
-  const daysMatch = text.match(daysRegex);
-  if (daysMatch) {
-    out.days = parseInt(daysMatch[1]);
-  }
-  
-  return out;
+  const d1 = parse(dateMatches[0]);
+  const d2 = parse(dateMatches[dateMatches.length - 1]);
+
+  out.days = Math.abs((d2 - d1) / (1000 * 60 * 60 * 24));
 }
 
 function extractPrices(text) {
