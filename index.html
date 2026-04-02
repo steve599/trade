@@ -406,80 +406,141 @@ function loadImg(file){
 // ── OCR + Analysis ───────────────────────────────────────────────
 document.getElementById('btn-run').addEventListener('click',runOCR);
 
-async function runOCR(){
-  if(!imgData) return;
-  const box=document.getElementById('ocr-box');
-  const msg=document.getElementById('ocr-msg');
-  const bar=document.getElementById('ocr-bar');
-  const dot=document.getElementById('dot');
-  box.style.display='block'; bar.style.width='0%'; dot.classList.add('on');
+// ── Enhanced OCR with Pre-processing ──────────────────────────────
+async function runOCR() {
+  if (!imgData) return;
+  const msg = document.getElementById('ocr-msg');
+  msg.textContent = 'Targeting sections...';
 
-  try{
-    const res=await Tesseract.recognize(imgData,'eng',{
-      logger:m=>{
-        if(m.status==='recognizing text'){
-          const p=Math.round(m.progress*100);
-          bar.style.width=p+'%';
-          msg.textContent='Scanning… '+p+'%';
+  try {
+    const processedBlob = await preprocessImage(imgData);
+    
+    // Initialize with both English and 'osd' (Orientation and Script Detection)
+    // for better layout handling of the 3-section vertical stack.
+    const worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          document.getElementById('ocr-bar').style.width = Math.round(m.progress * 100) + '%';
         }
       }
     });
-    msg.textContent='Analysis complete ✓';
-    dot.classList.remove('on');
-    const txt=res.data.text;
-    analysis=analyzeText(txt);
-    renderCards(analysis,txt);
-  }catch(err){
-    msg.textContent='Error: '+err.message;
-    dot.classList.remove('on');
+
+    await worker.setParameters({
+      // Increase threshold for small text
+      tessedit_char_whitelist: '0123456789.$%/,-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ',
+      tessedit_pageseg_mode: '3', // 3 treats the image as a single column of text
+    });
+
+    const { data: { text } } = await worker.recognize(processedBlob);
+    await worker.terminate();
+
+    const analysis = analyzeText(text);
+    renderCards(analysis, text);
+    msg.textContent = 'Scan Complete ✓';
+  } catch (err) {
+    msg.textContent = 'Error: ' + err.message;
   }
+}
+
+// ── Image Processing Helper ──────────────────────────────────────
+function preprocessImage(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Upscale 3x: The stats in the lower section are very small
+      const scale = 3;
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+
+      // Invert and boost contrast to make white/yellow text solid black
+      // and dark backgrounds solid white.
+      ctx.filter = 'invert(1) grayscale(1) contrast(5) brightness(1)';
+      ctx.imageSmoothingEnabled = false; 
+      
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => resolve(blob), 'image/png');
+    };
+    img.src = dataUrl;
+  });
 }
 
 // ── Analysis Engine ──────────────────────────────────────────────
-function analyzeText(text){
-  const prices=extractPrices(text);
-  const dates=extractDates(text);
-  const out={prices,dates,trend:'N/A',days:null,lo:null,loDt:null,hi:null,hiDt:null,delta:null,deltaPct:null,cur:null};
-  if(!prices.length) return out;
+// ── Fixed Analysis Engine ────────────────────────────────────────
+function analyzeText(rawText) {
+  // 1. Clean and split text into lines
+  const cleanText = rawText.replace(/[|\[\]{}|_]/g, '').trim();
+  const lines = cleanText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  
+  let result = {
+    ticker: 'Unknown',
+    cur: null,     // Matches UI 'd-cur'
+    trend: 'Neutral',
+    hi: null,      // Matches UI 'd-hi'
+    lo: null,      // Matches UI 'd-lo'
+    days: null,    // Matches UI 'd-days'
+    delta: null,
+    deltaPct: null
+  };
 
-  out.cur   = prices[prices.length-1];
-  out.lo    = Math.min(...prices);
-  out.hi    = Math.max(...prices);
-  out.delta = out.hi - out.lo;
-  out.deltaPct = out.lo>0 ? (out.delta/out.lo)*100 : null;
+  // 2. UPPER SECTION: Ticker & Days Covered
+  const tickerMatch = cleanText.match(/([A-Z0-9]{2,}\/[A-Z0-9]{2,})/);
+  if (tickerMatch) result.ticker = tickerMatch[1];
 
-  // Trend: first-third avg vs last-third avg
-  if(prices.length>=3){
-    const t=Math.max(1,Math.floor(prices.length/3));
-    const fa=avg(prices.slice(0,t)), la=avg(prices.slice(-t));
-    const ch=(la-fa)/fa;
-    out.trend = ch>0.02?'up':ch<-0.02?'down':'flat';
-  } else if(prices.length===2){
-    out.trend = prices[1]>prices[0]?'up':prices[1]<prices[0]?'down':'flat';
-  }
+  // Extract Days (looking for numbers near 'd' or 'days')
+  const daysMatch = cleanText.match(/(\d+)\s*d/i);
+  if (daysMatch) result.days = parseInt(daysMatch[1]);
 
-  // Days from date range
-  if(dates.length>=2){
-    const ts=dates.map(d=>d.getTime()).sort((a,b)=>a-b);
-    out.days=Math.round((ts[ts.length-1]-ts[0])/(864e5));
-    // Map dates→prices if 1:1
-    if(dates.length===prices.length){
-      const pairs=dates.map((d,i)=>({d,p:prices[i]})).sort((a,b)=>a.d-b.d);
-      out.loDt=pairs.reduce((m,x)=>x.p<m.p?x:m).d;
-      out.hiDt=pairs.reduce((m,x)=>x.p>m.p?x:m).d;
+  // 3. MIDDLE SECTION: RSI / Trend
+  if (cleanText.toLowerCase().includes('rsi')) {
+    const rsiMatch = cleanText.match(/RSI.*?(\d{1,3}\.\d{1,2})/i);
+    if (rsiMatch) {
+      const val = parseFloat(rsiMatch[1]);
+      result.trend = val > 70 ? 'Overbought' : (val < 30 ? 'Oversold' : 'Neutral');
     }
   }
-  return out;
+
+  // 4. LOWER SECTION: Price Stats (Current, High, Low)
+  // We use your extractPrices logic to find all decimals like 184.23
+  const prices = extractPrices(cleanText);
+  
+  if (prices.length >= 3) {
+    // In trading apps, the largest text or the last numbers in the list 
+    // are usually the price stats.
+    result.cur = prices[prices.length - 1]; // Assuming current price is at bottom
+    result.hi  = Math.max(...prices);
+    result.lo  = Math.min(...prices);
+    
+    // Calculate Delta (High - Low)
+    result.delta = result.hi - result.lo;
+    result.deltaPct = (result.delta / result.lo) * 100;
+  }
+
+  return result;
 }
 
-function extractPrices(text){
-  // Match standalone decimal numbers; filter years & trivially small integers
-  const re=/(?<!\w)\$?\s*(\d{1,8}(?:,\d{3})*(?:\.\d{1,4})?)(?!\w)/g;
-  const found=[]; let m;
-  while((m=re.exec(text))!==null){
-    const n=parseFloat(m[1].replace(/,/g,''));
-    if(n>0.01 && !(n>=1900&&n<=2100&&!m[1].includes('.'))) found.push(n);
+function extractPrices(text) {
+  // Updated Regex: 
+  // 1. Removes the mandatory '$' and ',' requirements
+  // 2. Looks for 1-6 digits followed by a dot and at least 2 decimals
+  const re = /\d{1,6}\.\d{2,}/g; 
+  const found = [];
+  let m;
+
+  while ((m = re.exec(text)) !== null) {
+    // We keep your cleaning logic, but it's now simpler 
+    // since we aren't looking for commas/symbols
+    const val = m[0].replace(/[$,\s]/g, '');
+    const n = parseFloat(val);
+    
+    // Validates that it's a real number and not a tiny fraction
+    if (!isNaN(n) && n > 0.01) {
+      found.push(n);
+    }
   }
+
   return found;
 }
 
@@ -519,20 +580,33 @@ function trendCls(t){return {up:'up',down:'dn',flat:'flat','N/A':''}[t]||''}
 
 // ── Render Extracted Cards ───────────────────────────────────────
 function renderCards(r,raw){
-  function set(id,v,cls){
-    const el=document.getElementById(id);
-    el.textContent=v; el.className='val '+(cls||'');
+   function set(id, v, cls) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = v; 
+    el.className = 'val ' + (cls || '');
   }
-  set('d-trend',trendDisp(r.trend),trendCls(r.trend));
-  set('d-days',r.days!=null?r.days+' days':'—');
-  set('d-cur',fp(r.cur),'gold');
-  set('d-delta',r.delta!=null?fp(r.delta)+(r.deltaPct?` (+${r.deltaPct.toFixed(1)}%)`:''):'—','up');
-  set('d-lo',fp(r.lo),'dn');
-  document.getElementById('d-lo-dt').textContent=fd(r.loDt);
-  set('d-hi',fp(r.hi),'up');
-  document.getElementById('d-hi-dt').textContent=fd(r.hiDt);
-  document.getElementById('d-raw').textContent=raw.trim()||'No text detected';
-  document.getElementById('result-wrap').style.display='block';
+
+  // Set the primary metrics
+  set('d-trend', r.trend, trendCls(r.trend.toLowerCase()));
+  set('d-days',  r.days ? r.days + ' days' : '—');
+  set('d-cur',   fp(r.cur), 'gold');
+  set('d-hi',    fp(r.hi), 'up');
+  set('d-lo',    fp(r.lo), 'dn');
+
+  // Set the Delta
+  if (r.delta !== null) {
+    const deltaText = `${fp(r.delta)} (+${r.deltaPct.toFixed(1)}%)`;
+    set('d-delta', deltaText, 'up');
+  } else {
+    set('d-delta', '—');
+  }
+
+  document.getElementById('d-raw').textContent = raw.trim() || 'No text detected';
+  document.getElementById('result-wrap').style.display = 'block';
+  
+  // Update state for the report generator
+  analysis = r; 
 }
 
 // ── Conditions ───────────────────────────────────────────────────
@@ -651,18 +725,36 @@ function buildReport(){
 }
 
 // ── Copy ─────────────────────────────────────────────────────────
-document.getElementById('btn-copy').addEventListener('click',async function(){
-  const txt=this.dataset.report||reportText;
+document.getElementById('btn-copy').addEventListener('click',function(){
+  const txt = this.dataset.report || reportText;
   if(!txt) return;
-  try{
-    await navigator.clipboard.writeText(txt);
-  }catch{
-    const ta=Object.assign(document.createElement('textarea'),{value:txt,style:'position:fixed;opacity:0'});
-    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+
+  const blob = new Blob([txt], { type: 'text/plain' });
+  const fileName = 'ScreenScan_Report.txt';
+
+  // iOS / modern browsers (opens in share sheet → save to Notes)
+  if (navigator.canShare && navigator.canShare({ files: [new File([blob], fileName)] })) {
+    const file = new File([blob], fileName, { type: 'text/plain' });
+    navigator.share({ files: [file], title: 'ScreenScan Report' });
+    return;
   }
-  const el=document.getElementById('copy-ok');
-  el.style.display='block'; setTimeout(()=>el.style.display='none',3000);
+
+  // Fallback: download file
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 });
+
+// Helper for UI feedback
+function showToast(msg) {
+  const el = document.getElementById('copy-ok');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 3000);
+}
 </script>
 </body>
 </html>
